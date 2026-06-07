@@ -7,9 +7,17 @@
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
   <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
   <style>
-    * { margin: 0; padding: 0; }
-    body { overflow: hidden; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+    #start-btn {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 16px 36px; font-size: 20px;
+      background: #4caf50; color: #fff;
+      border: none; border-radius: 10px;
+      cursor: pointer; z-index: 1000;
+    }
     #info {
+      display: none;
       position: fixed; top: 12px; left: 0; right: 0;
       text-align: center; color: #fff;
       font-family: sans-serif; font-size: 14px;
@@ -19,11 +27,13 @@
   </style>
 </head>
 <body>
+  <button id="start-btn">AR を開始する</button>
   <div id="info">マーカーにカメラを向けてください</div>
 
   <a-scene
-    mindar-image="imageTargetSrc: ./targets.mind;"
+    mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiLoading: yes; uiError: yes; uiScanning: yes;"
     color-space="sRGB"
+    embedded
     renderer="colorManagement: true"
     vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: false"
@@ -44,10 +54,17 @@
   </a-scene>
 
   <script>
-    const plane = document.querySelector('#chara-plane');
-    const info  = document.querySelector('#info');
-    const target = document.querySelector('#target');
+    const sceneEl  = document.querySelector('a-scene');
+    const startBtn = document.querySelector('#start-btn');
+    const info     = document.querySelector('#info');
 
+    startBtn.addEventListener('click', () => {
+      startBtn.style.display = 'none';
+      info.style.display = 'block';
+      sceneEl.systems['mindar-image-system'].start();
+    });
+
+    const target = document.querySelector('#target');
     target.addEventListener('targetFound', () => {
       info.textContent = '認識OK — タップでジャンプ';
     });
@@ -56,6 +73,7 @@
     });
 
     // タップでジャンプ（放物線）
+    const plane = document.querySelector('#chara-plane');
     let jumping = false;
     plane.addEventListener('click', () => {
       if (jumping) return;
