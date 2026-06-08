@@ -56,7 +56,7 @@
     <a-entity id="target" mindar-image-target="targetIndex: 0">
       <a-image id="chara-plane" src="#chara"
         position="0 0 0.001"
-        width="0.6" height="1.0"
+        width="0.8" height="0.8"
         transparent="true">
       </a-image>
     </a-entity>
@@ -86,17 +86,25 @@
     });
 
     const target = document.querySelector('#target');
+    const plane  = document.querySelector('#chara-plane');
+    let isTracking = false;
+    let jumping    = false;
+
     target.addEventListener('targetFound', () => {
       info.textContent = '認識OK — タップでジャンプ';
+      isTracking = true;
     });
     target.addEventListener('targetLost', () => {
       info.textContent = 'マーカーを探しています...';
+      isTracking = false;
     });
 
-    const plane = document.querySelector('#chara-plane');
-    let jumping = false;
-    plane.addEventListener('click', () => {
-      if (jumping) return;
+    // A-Frame の click はカーソルが必要なので document レベルで取る
+    document.addEventListener('click', triggerJump);
+    document.addEventListener('touchstart', triggerJump, { passive: true });
+
+    function triggerJump() {
+      if (!isTracking || jumping) return;
       jumping = true;
       let t = 0;
       const id = setInterval(() => {
@@ -111,7 +119,7 @@
         const h = 0.3 * 4 * n * (1 - n);
         plane.setAttribute('position', `0 ${h + 0.001} 0.001`);
       }, 16);
-    });
+    }
   </script>
 </body>
 </html>
