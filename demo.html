@@ -97,46 +97,51 @@
     }
 
     // ---- スモーク ----
-    // offsets: [x, y, delay_ms]
-    const SMOKE_OFFSETS = [
-      [ 0,     0.05, 0  ],
-      [-0.12,  0.10, 50 ],
-      [ 0.12,  0.10, 50 ],
-      [ 0,     0.20, 100],
-      [-0.08, -0.05, 80 ],
-      [ 0.08, -0.05, 80 ],
+    // キャラ全体を覆う大きな雲を展開→フェードアウト
+    const SMOKE_POS = [
+      { x:  0,    y:  0.05, delay:  0 },
+      { x: -0.2,  y:  0.1,  delay: 40 },
+      { x:  0.2,  y:  0.1,  delay: 40 },
+      { x: -0.1,  y: -0.15, delay: 80 },
+      { x:  0.1,  y: -0.15, delay: 80 },
     ];
 
-    function createSmokePuff(x, y) {
-      const puff = document.createElement('a-circle');
-      puff.setAttribute('material', 'color: #ddd; transparent: true; opacity: 0.55; shader: flat');
-      puff.setAttribute('radius', '0.07');
-      puff.object3D.position.set(x, y, 0);
-      puff.object3D.scale.set(0.2, 0.2, 1);
-      smokeContainer.appendChild(puff);
+    function spawnSmokeCloud(x, y, delay) {
+      setTimeout(() => {
+        const cloud = document.createElement('a-circle');
+        cloud.setAttribute('material', 'color: #c0c0c0; transparent: true; opacity: 0.85; shader: flat');
+        cloud.setAttribute('radius', '0.38');
+        cloud.object3D.position.set(x, y, 0.005);
+        cloud.object3D.scale.set(0.3, 0.3, 1);
+        smokeContainer.appendChild(cloud);
 
-      let t = 0;
-      const id = setInterval(() => {
-        t = Math.min(t + 0.016, 0.55);
-        const n = t / 0.55;
-        puff.object3D.scale.set(0.2 + 1.6 * n, 0.2 + 1.6 * n, 1);
-        puff.object3D.position.y = y + 0.22 * n;
-        const mesh = puff.getObject3D('mesh');
-        if (mesh) {
-          mesh.material.opacity = 0.55 * (1 - n);
-          mesh.material.needsUpdate = true;
-        }
-        if (t >= 0.55) {
-          clearInterval(id);
-          if (puff.parentNode) puff.parentNode.removeChild(puff);
-        }
-      }, 16);
+        let t = 0;
+        const expandDur = 0.15; // 膨らむ
+        const fadeDur   = 0.70; // フェードアウト
+        const total     = expandDur + fadeDur;
+
+        const id = setInterval(() => {
+          t += 0.016;
+          if (t <= expandDur) {
+            const n = t / expandDur;
+            cloud.object3D.scale.set(0.3 + 0.9 * n, 0.3 + 0.9 * n, 1);
+          } else {
+            const n = (t - expandDur) / fadeDur;
+            cloud.object3D.scale.set(1.2 + 0.3 * n, 1.2 + 0.3 * n, 1);
+            cloud.object3D.position.y = y + 0.18 * n;
+            const mesh = cloud.getObject3D('mesh');
+            if (mesh) { mesh.material.opacity = 0.85 * (1 - n); mesh.material.needsUpdate = true; }
+          }
+          if (t >= total) {
+            clearInterval(id);
+            if (cloud.parentNode) cloud.parentNode.removeChild(cloud);
+          }
+        }, 16);
+      }, delay);
     }
 
-    function playSmoke() {
-      SMOKE_OFFSETS.forEach(([x, y, delay]) => {
-        setTimeout(() => createSmokePuff(x, y), delay);
-      });
+    function spawnSmoke() {
+      SMOKE_POS.forEach(({ x, y, delay }) => spawnSmokeCloud(x, y, delay));
     }
 
     // ---- 待機ボブ（chara-root の Y） ----
@@ -156,11 +161,11 @@
       root.object3D.position.y = 0;
     }
 
-    // ---- 登場（スモーク → スケール 0→1） ----
+    // ---- 登場: スモーク展開 → スモーク越しにキャラが現れる ----
     function playAppear() {
-      playSmoke();
       plane.object3D.scale.set(0.001, 0.001, 0.001);
-      // スモークが少し広がってからキャラが出る（100ms 遅延）
+      spawnSmoke(); // スモーク先行
+      // スモークがピーク（150ms）になったらキャラ出現開始
       setTimeout(() => {
         let t = 0;
         const id = setInterval(() => {
@@ -169,22 +174,23 @@
           plane.object3D.scale.set(s, s, s);
           if (t >= 0.5) { clearInterval(id); startIdle(); }
         }, 16);
-      }, 100);
+      }, 150);
     }
 
-    // ---- 消える（スケール 1→0 → スモーク） ----
+    // ---- 消える: スモーク展開 → ピーク時にキャラ消去 → スモーク晴れる ----
     function playDisappear() {
       stopIdle();
-      let t = 0;
-      const id = setInterval(() => {
-        t = Math.min(t + 0.016, 0.15);
-        const s = 1 - t / 0.15;
-        plane.object3D.scale.set(s, s, s);
-        if (t >= 0.15) {
-          clearInterval(id);
-          playSmoke(); // 消えた瞬間にスモーク
-        }
-      }, 16);
+      spawnSmoke(); // スモーク先行
+      // スモークがピーク（150ms）でキャラを素早く消す
+      setTimeout(() => {
+        let t = 0;
+        const id = setInterval(() => {
+          t = Math.min(t + 0.016, 0.12);
+          plane.object3D.scale.set(1 - t / 0.12, 1 - t / 0.12, 1 - t / 0.12);
+          if (t >= 0.12) clearInterval(id);
+        }, 16);
+      }, 150);
+      // スモークはその後 700ms かけて自然に晴れる
     }
 
     // ---- ジャンプ（chara-plane の Y） ----
