@@ -10,13 +10,10 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; overflow: hidden; }
     .a-canvas { background: transparent !important; }
-
     #overlay {
-      position: fixed; top: 0; left: 0;
-      width: 100%; height: 100%;
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
       display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.75);
-      z-index: 1000;
+      background: rgba(0,0,0,0.75); z-index: 1000;
     }
     #start-btn {
       padding: 16px 36px; font-size: 20px;
@@ -28,8 +25,7 @@
       position: fixed; top: 12px; left: 0; right: 0;
       text-align: center; color: #fff;
       font-family: sans-serif; font-size: 14px;
-      text-shadow: 0 0 4px #000;
-      z-index: 999; pointer-events: none;
+      text-shadow: 0 0 4px #000; z-index: 999; pointer-events: none;
     }
   </style>
 </head>
@@ -49,15 +45,17 @@
     <a-assets>
       <img id="chara" src="./butter_512.png">
     </a-assets>
-
     <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
     <a-entity id="target" mindar-image-target="targetIndex: 0">
-      <a-image id="chara-plane" src="#chara"
-        position="0 0 0.001"
-        width="0.8" height="0.8"
-        transparent="true">
-      </a-image>
+      <!-- 待機ボブはこのエンティティのY座標で制御 -->
+      <a-entity id="chara-root" position="0 0 0.001">
+        <!-- ジャンプと出現スケールはこのエンティティで制御 -->
+        <a-image id="chara-plane" src="#chara"
+          position="0 0 0" width="0.8" height="0.8"
+          transparent="true" scale="0 0 0">
+        </a-image>
+      </a-entity>
     </a-entity>
   </a-scene>
 
@@ -66,59 +64,108 @@
     const overlay  = document.querySelector('#overlay');
     const startBtn = document.querySelector('#start-btn');
     const info     = document.querySelector('#info');
+    const target   = document.querySelector('#target');
+    const root     = document.querySelector('#chara-root');
+    const plane    = document.querySelector('#chara-plane');
 
-    startBtn.addEventListener('click', async () => {
+    // ---- AR 起動 ----
+    startBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
       startBtn.disabled = true;
       startBtn.textContent = '読み込み中...';
-
       try {
         if (!sceneEl.hasLoaded) {
-          await new Promise(resolve => sceneEl.addEventListener('loaded', resolve, { once: true }));
+          await new Promise(r => sceneEl.addEventListener('loaded', r, { once: true }));
         }
         await sceneEl.systems['mindar-image-system'].start();
         overlay.style.display = 'none';
-      } catch (e) {
+      } catch (err) {
         startBtn.textContent = 'エラー — 再読み込みしてください';
         startBtn.disabled = false;
-        console.error(e);
       }
     });
 
-    const target = document.querySelector('#target');
-    const plane  = document.querySelector('#chara-plane');
-    let isTracking = false;
-    let jumping    = false;
+    // ---- イージング ----
+    function easeOutBack(x) {
+      const c1 = 1.70158, c3 = c1 + 1;
+      return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+    }
 
-    target.addEventListener('targetFound', () => {
-      info.textContent = '認識OK — タップでジャンプ';
-      isTracking = true;
-    });
-    target.addEventListener('targetLost', () => {
-      info.textContent = 'マーカーを探しています...';
-      isTracking = false;
-    });
+    // ---- 待機ボブ（chara-root の Y） ----
+    let idleTimer = null, idlePhase = 0;
 
-    // A-Frame の click はカーソルが必要なので document レベルで取る
-    document.addEventListener('click', triggerJump);
-    document.addEventListener('touchstart', triggerJump, { passive: true });
+    function startIdle() {
+      stopIdle();
+      idlePhase = 0;
+      idleTimer = setInterval(() => {
+        idlePhase += 0.016 / 1.5 * Math.PI * 2; // 周期 1.5s
+        root.object3D.position.y = Math.sin(idlePhase) * 0.015;
+      }, 16);
+    }
+
+    function stopIdle() {
+      if (idleTimer) { clearInterval(idleTimer); idleTimer = null; }
+      root.object3D.position.y = 0;
+    }
+
+    // ---- 登場（スケール 0→1、easeOutBack） ----
+    function playAppear() {
+      plane.object3D.scale.set(0.001, 0.001, 0.001);
+      let t = 0;
+      const id = setInterval(() => {
+        t = Math.min(t + 0.016, 0.5);
+        const s = easeOutBack(t / 0.5);
+        plane.object3D.scale.set(s, s, s);
+        if (t >= 0.5) { clearInterval(id); startIdle(); }
+      }, 16);
+    }
+
+    // ---- 消える（スケール 1→0） ----
+    function playDisappear() {
+      stopIdle();
+      let t = 0;
+      const id = setInterval(() => {
+        t = Math.min(t + 0.016, 0.2);
+        const s = 1 - t / 0.2;
+        plane.object3D.scale.set(s, s, s);
+        if (t >= 0.2) clearInterval(id);
+      }, 16);
+    }
+
+    // ---- ジャンプ（chara-plane の Y） ----
+    let jumping = false, isTracking = false;
 
     function triggerJump() {
       if (!isTracking || jumping) return;
       jumping = true;
       let t = 0;
       const id = setInterval(() => {
-        t += 0.016;
+        t = Math.min(t + 0.016, 0.7);
         const n = t / 0.7;
-        if (n >= 1) {
-          plane.setAttribute('position', '0 0.001 0.001');
+        plane.object3D.position.y = 0.3 * 4 * n * (1 - n);
+        if (t >= 0.7) {
+          plane.object3D.position.y = 0;
           clearInterval(id);
           jumping = false;
-          return;
         }
-        const h = 0.3 * 4 * n * (1 - n);
-        plane.setAttribute('position', `0 ${h + 0.001} 0.001`);
       }, 16);
     }
+
+    // ---- マーカーイベント ----
+    target.addEventListener('targetFound', () => {
+      info.textContent = '認識OK — タップでジャンプ';
+      isTracking = true;
+      playAppear();
+    });
+    target.addEventListener('targetLost', () => {
+      info.textContent = 'マーカーを探しています...';
+      isTracking = false;
+      jumping = false;
+      playDisappear();
+    });
+
+    document.addEventListener('click', triggerJump);
+    document.addEventListener('touchstart', triggerJump, { passive: true });
   </script>
 </body>
 </html>
