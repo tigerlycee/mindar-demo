@@ -36,7 +36,9 @@
   <div id="info">マーカーにカメラを向けてください</div>
 
   <a-scene
-    mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiLoading: yes; uiError: yes; uiScanning: yes;"
+    mindar-image="imageTargetSrc: ./targets.mind; autoStart: false;
+      uiLoading: yes; uiError: yes; uiScanning: yes;
+      filterMinCF: 0.001; filterBeta: 10000; missTolerance: 5;"
     color-space="sRGB"
     renderer="colorManagement: true; alpha: true"
     vr-mode-ui="enabled: false"
@@ -48,9 +50,11 @@
     <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
     <a-entity id="target" mindar-image-target="targetIndex: 0">
-      <!-- 待機ボブはこのエンティティのY座標で制御 -->
+      <!-- スモーク用コンテナ（ボブと独立） -->
+      <a-entity id="smoke-container" position="0 0 0.002"></a-entity>
+      <!-- 待機ボブ: このエンティティの Y で制御 -->
       <a-entity id="chara-root" position="0 0 0.001">
-        <!-- ジャンプと出現スケールはこのエンティティで制御 -->
+        <!-- ジャンプ・出現スケール: このエンティティで制御 -->
         <a-image id="chara-plane" src="#chara"
           position="0 0 0" width="0.8" height="0.8"
           transparent="true" scale="0 0 0">
@@ -60,13 +64,14 @@
   </a-scene>
 
   <script>
-    const sceneEl  = document.querySelector('a-scene');
-    const overlay  = document.querySelector('#overlay');
-    const startBtn = document.querySelector('#start-btn');
-    const info     = document.querySelector('#info');
-    const target   = document.querySelector('#target');
-    const root     = document.querySelector('#chara-root');
-    const plane    = document.querySelector('#chara-plane');
+    const sceneEl       = document.querySelector('a-scene');
+    const overlay       = document.querySelector('#overlay');
+    const startBtn      = document.querySelector('#start-btn');
+    const info          = document.querySelector('#info');
+    const target        = document.querySelector('#target');
+    const smokeContainer= document.querySelector('#smoke-container');
+    const root          = document.querySelector('#chara-root');
+    const plane         = document.querySelector('#chara-plane');
 
     // ---- AR 起動 ----
     startBtn.addEventListener('click', async (e) => {
@@ -91,6 +96,49 @@
       return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
     }
 
+    // ---- スモーク ----
+    // offsets: [x, y, delay_ms]
+    const SMOKE_OFFSETS = [
+      [ 0,     0.05, 0  ],
+      [-0.12,  0.10, 50 ],
+      [ 0.12,  0.10, 50 ],
+      [ 0,     0.20, 100],
+      [-0.08, -0.05, 80 ],
+      [ 0.08, -0.05, 80 ],
+    ];
+
+    function createSmokePuff(x, y) {
+      const puff = document.createElement('a-circle');
+      puff.setAttribute('material', 'color: #ddd; transparent: true; opacity: 0.55; shader: flat');
+      puff.setAttribute('radius', '0.07');
+      puff.object3D.position.set(x, y, 0);
+      puff.object3D.scale.set(0.2, 0.2, 1);
+      smokeContainer.appendChild(puff);
+
+      let t = 0;
+      const id = setInterval(() => {
+        t = Math.min(t + 0.016, 0.55);
+        const n = t / 0.55;
+        puff.object3D.scale.set(0.2 + 1.6 * n, 0.2 + 1.6 * n, 1);
+        puff.object3D.position.y = y + 0.22 * n;
+        const mesh = puff.getObject3D('mesh');
+        if (mesh) {
+          mesh.material.opacity = 0.55 * (1 - n);
+          mesh.material.needsUpdate = true;
+        }
+        if (t >= 0.55) {
+          clearInterval(id);
+          if (puff.parentNode) puff.parentNode.removeChild(puff);
+        }
+      }, 16);
+    }
+
+    function playSmoke() {
+      SMOKE_OFFSETS.forEach(([x, y, delay]) => {
+        setTimeout(() => createSmokePuff(x, y), delay);
+      });
+    }
+
     // ---- 待機ボブ（chara-root の Y） ----
     let idleTimer = null, idlePhase = 0;
 
@@ -98,7 +146,7 @@
       stopIdle();
       idlePhase = 0;
       idleTimer = setInterval(() => {
-        idlePhase += 0.016 / 1.5 * Math.PI * 2; // 周期 1.5s
+        idlePhase += 0.016 / 1.5 * Math.PI * 2;
         root.object3D.position.y = Math.sin(idlePhase) * 0.015;
       }, 16);
     }
@@ -108,27 +156,34 @@
       root.object3D.position.y = 0;
     }
 
-    // ---- 登場（スケール 0→1、easeOutBack） ----
+    // ---- 登場（スモーク → スケール 0→1） ----
     function playAppear() {
+      playSmoke();
       plane.object3D.scale.set(0.001, 0.001, 0.001);
-      let t = 0;
-      const id = setInterval(() => {
-        t = Math.min(t + 0.016, 0.5);
-        const s = easeOutBack(t / 0.5);
-        plane.object3D.scale.set(s, s, s);
-        if (t >= 0.5) { clearInterval(id); startIdle(); }
-      }, 16);
+      // スモークが少し広がってからキャラが出る（100ms 遅延）
+      setTimeout(() => {
+        let t = 0;
+        const id = setInterval(() => {
+          t = Math.min(t + 0.016, 0.5);
+          const s = easeOutBack(t / 0.5);
+          plane.object3D.scale.set(s, s, s);
+          if (t >= 0.5) { clearInterval(id); startIdle(); }
+        }, 16);
+      }, 100);
     }
 
-    // ---- 消える（スケール 1→0） ----
+    // ---- 消える（スケール 1→0 → スモーク） ----
     function playDisappear() {
       stopIdle();
       let t = 0;
       const id = setInterval(() => {
-        t = Math.min(t + 0.016, 0.2);
-        const s = 1 - t / 0.2;
+        t = Math.min(t + 0.016, 0.15);
+        const s = 1 - t / 0.15;
         plane.object3D.scale.set(s, s, s);
-        if (t >= 0.2) clearInterval(id);
+        if (t >= 0.15) {
+          clearInterval(id);
+          playSmoke(); // 消えた瞬間にスモーク
+        }
       }, 16);
     }
 
