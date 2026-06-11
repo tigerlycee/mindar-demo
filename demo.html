@@ -45,8 +45,7 @@
     device-orientation-permission-ui="enabled: false"
   >
     <a-assets>
-      <img id="chara"  src="./butter_512.png">
-      <img id="smoke1" src="./smoke_1.png">
+      <img id="chara" src="./butter_512.png">
     </a-assets>
     <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
@@ -97,42 +96,36 @@
       return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
     }
 
-    // ---- スモーク（smoke_1 のみ）----
-    // expand(0.18s) → 透明度0で保持(0.7s) → fade out(0.6s)
-    function spawnSmoke() {
-      const img = document.createElement('a-image');
-      img.setAttribute('src', '#smoke1');
-      img.setAttribute('width', '2.6');
-      img.setAttribute('height', '0.8');
-      img.setAttribute('material', 'transparent: true; alphaTest: 0.05; shader: flat; opacity: 0.9');
-      img.object3D.position.set(0, -0.1, 0.001);
-      img.object3D.scale.set(0.05, 0.05, 1);
-      smokeContainer.appendChild(img);
-
-      let t = 0;
-      const expandDur = 0.18;
-      const holdDur   = 0.70;
-      const fadeDur   = 0.60;
-      const total     = expandDur + holdDur + fadeDur;
-
-      const id = setInterval(() => {
-        t += 0.016;
-        if (t <= expandDur) {
-          const n = t / expandDur;
-          img.object3D.scale.set(0.05 + 0.95 * n, 0.05 + 0.95 * n, 1);
-        } else if (t <= expandDur + holdDur) {
-          // 不透明のまま保持
-        } else {
-          const n = (t - expandDur - holdDur) / fadeDur;
-          img.object3D.position.y = -0.1 + 0.2 * n;
-          const mesh = img.getObject3D('mesh');
-          if (mesh) { mesh.material.opacity = 0.9 * (1 - n); mesh.material.needsUpdate = true; }
-        }
-        if (t >= total) {
-          clearInterval(id);
-          if (img.parentNode) img.parentNode.removeChild(img);
-        }
-      }, 16);
+    // ---- パーティクル（登場時：カラフルな丸が飛び散る）----
+    function spawnParticles() {
+      const colors = ['#FFD700', '#FF69B4', '#FF4500', '#00CED1', '#FF1493', '#7B68EE', '#FFD700', '#FF69B4', '#FF4500', '#00CED1'];
+      const count = 10;
+      for (let i = 0; i < count; i++) {
+        const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+        const speed = 0.35 + Math.random() * 0.25;
+        const radius = 0.03 + Math.random() * 0.03;
+        const p = document.createElement('a-circle');
+        p.setAttribute('material', `color: ${colors[i % colors.length]}; transparent: true; opacity: 1; shader: flat`);
+        p.setAttribute('radius', String(radius));
+        p.object3D.position.set(0, -0.3, 0.004);
+        smokeContainer.appendChild(p);
+        setTimeout(() => {
+          let t = 0;
+          const dur = 0.5 + Math.random() * 0.2;
+          const id = setInterval(() => {
+            t += 0.016;
+            const n = Math.min(t / dur, 1);
+            p.object3D.position.set(
+              Math.cos(angle) * speed * n,
+              -0.3 + Math.sin(angle) * speed * n + 0.1 * n,
+              0.004
+            );
+            const mesh = p.getObject3D('mesh');
+            if (mesh) { mesh.material.opacity = Math.max(0, 1 - n * n * 1.5); mesh.material.needsUpdate = true; }
+            if (t >= dur) { clearInterval(id); if (p.parentNode) p.parentNode.removeChild(p); }
+          }, 16);
+        }, i * 15);
+      }
     }
 
     // ---- 待機ボブ（chara-root の Y） ----
@@ -152,35 +145,42 @@
       root.object3D.position.y = 0;
     }
 
-    // ---- 登場: スモーク保持(0.88s) → スモークが晴れはじめたらキャラ出現 ----
+    // ---- 登場: 足元(y=-0.4)からスケールアップ + パーティクル ----
     function playAppear() {
       plane.object3D.scale.set(0.001, 0.001, 0.001);
-      spawnSmoke();
-      setTimeout(() => {
-        let t = 0;
-        const id = setInterval(() => {
-          t = Math.min(t + 0.016, 0.5);
-          const s = easeOutBack(t / 0.5);
-          plane.object3D.scale.set(s, s, s);
-          if (t >= 0.5) { clearInterval(id); startIdle(); }
-        }, 16);
-      }, 180); // expand終了と同時
+      plane.object3D.position.y = -0.4;
+      const mesh = plane.getObject3D('mesh');
+      if (mesh) { mesh.material.color.setRGB(1, 1, 1); mesh.material.needsUpdate = true; }
+      spawnParticles();
+      let t = 0;
+      const id = setInterval(() => {
+        t = Math.min(t + 0.016, 0.5);
+        const n = t / 0.5;
+        const s = easeOutBack(n);
+        plane.object3D.scale.set(s, s, s);
+        plane.object3D.position.y = (n - 1) * 0.4; // 足元固定で上に伸びる
+        if (t >= 0.5) { plane.object3D.position.y = 0; clearInterval(id); startIdle(); }
+      }, 16);
     }
 
-    // ---- 消える: スモーク展開 → ピーク時にキャラ消去 → スモーク晴れる ----
+    // ---- 消える: じわっと暗転 → ほぼ黒でパッと消える ----
     function playDisappear() {
       stopIdle();
-      spawnSmoke(); // スモーク先行
-      // スモークがピーク（150ms）でキャラを素早く消す
-      setTimeout(() => {
-        let t = 0;
-        const id = setInterval(() => {
-          t = Math.min(t + 0.016, 0.12);
-          plane.object3D.scale.set(1 - t / 0.12, 1 - t / 0.12, 1 - t / 0.12);
-          if (t >= 0.12) clearInterval(id);
-        }, 16);
-      }, 150);
-      // スモークはその後 700ms かけて自然に晴れる
+      let t = 0;
+      const darkDur = 0.7;
+      const id = setInterval(() => {
+        t += 0.016;
+        const n = Math.min(t / darkDur, 1);
+        const b = 1 - n;
+        const mesh = plane.getObject3D('mesh');
+        if (mesh) { mesh.material.color.setRGB(b, b, b); mesh.material.needsUpdate = true; }
+        if (n >= 1) {
+          clearInterval(id);
+          plane.object3D.scale.set(0, 0, 0);
+          const mesh2 = plane.getObject3D('mesh');
+          if (mesh2) { mesh2.material.color.setRGB(1, 1, 1); mesh2.material.needsUpdate = true; }
+        }
+      }, 16);
     }
 
     // ---- ジャンプ（chara-plane の Y） ----
